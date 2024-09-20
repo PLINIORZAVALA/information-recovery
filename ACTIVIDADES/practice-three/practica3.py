@@ -3,6 +3,7 @@ from tkinter import ttk
 import os
 import pandas as pd
 import nltk
+import unicodedata
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
@@ -60,7 +61,6 @@ def read_powerpoint(file_path):
     return content
 
 def tokenize_and_process_documents(corpus_dir):
-    dictionary = {}
     initial_dictionary = {}
 
     stemmer = PorterStemmer()
@@ -86,9 +86,10 @@ def tokenize_and_process_documents(corpus_dir):
         else:
             print(f"Ignorando archivo no soportado: {filename}")
             continue
-
+    # Inicio del primer proceso
         tokens = word_tokenize(content)
-        tokens = [word for word in tokens if word.isalnum()]
+        tokens = [word for word in tokens if word.isalnum() and not word.isnumeric()]
+        tokens = [unicodedata.normalize('NFKD', word).encode('ascii', 'ignore').decode('utf-8') for word in tokens]
 
         for token in tokens:
             if token not in initial_dictionary:
@@ -101,29 +102,39 @@ def tokenize_and_process_documents(corpus_dir):
     df_initial.to_excel(os.path.join(output_folder, '1Diccionario.xlsx'), index=False)
     print('Diccionario inicial guardado en "1Diccionario.xlsx".')
 
-    for token in tokens:
-        token_upper = token.upper()
-        if token_upper not in dictionary:
-            dictionary[token_upper] = 1
-        else:
-            dictionary[token_upper] += 1
+
+    # inicio del segundo proceso
+    upper_dictionary = {}
+
+    # Proceso de cambio a mayúsculas tomando como base el diccionario inicial
+    for token in initial_dictionary:
+     token_upper = token.upper()
+     if token_upper not in upper_dictionary:
+         upper_dictionary[token_upper] = initial_dictionary[token]
+    else:
+         upper_dictionary[token_upper] += initial_dictionary[token]  # Si ya existe, sumar la frecuencia
 
     # Guardar el diccionario con mayúsculas en "2DiccMayus.xlsx"
-    df_upper = pd.DataFrame(list(dictionary.items()), columns=['Termino', 'Frecuencia'])
+    df_upper = pd.DataFrame(list(upper_dictionary.items()), columns=['Termino', 'Frecuencia'])
     df_upper.to_excel(os.path.join(output_folder, '2DiccMayus.xlsx'), index=False)
-    print('Diccionario guardado en "2DiccMayus.xlsx".')
+    print('Diccionario con mayúsculas guardado en "2DiccMayus.xlsx".')
 
-    filtered_dictionary = {word: count for word, count in dictionary.items() if word not in stop_words}
+    #Proceso numero 3
+    stop_words = set(stopwords.words('spanish'))
+    stop_words_upper = {word.upper() for word in stop_words}
+    filtered_dictionary = {word: count for word, count in upper_dictionary.items() if word not in stop_words_upper}
 
     # Guardar el diccionario sin stop words en "3DiccMSinStopWords.xlsx"
     df_filtered = pd.DataFrame(list(filtered_dictionary.items()), columns=['Termino', 'Frecuencia'])
     df_filtered.to_excel(os.path.join(output_folder, '3DiccMSinStopWords.xlsx'), index=False)
     print('Diccionario sin stop words guardado en "3DiccMSinStopWords.xlsx".')
-
+    
+    #Proceso numnero 4
     stemmer = SnowballStemmer("spanish")
     stemmed_dictionary = {}
+    
     for word, count in filtered_dictionary.items():
-        stemmed_word = stemmer.stem(word)
+        stemmed_word = stemmer.stem(word).upper()
         if stemmed_word not in stemmed_dictionary:
             stemmed_dictionary[stemmed_word] = count
         else:
