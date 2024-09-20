@@ -101,39 +101,45 @@ def tokenize_and_process_documents(corpus_dir):
     df_initial = pd.DataFrame(list(initial_dictionary.items()), columns=['Termino', 'Frecuencia'])
     df_initial.to_excel(os.path.join(output_folder, '1Diccionario.xlsx'), index=False)
     print('Diccionario inicial guardado en "1Diccionario.xlsx".')
+    
+    # Inicio del segundo proceso
+    # Crear una lista para los términos en mayúsculas
+    upper_terms = []
 
+    # Convertir los términos a mayúsculas y mantener la frecuencia
+    for token, freq in initial_dictionary.items():
+        upper_terms.append({'Termino': token.upper(), 'Frecuencia': freq})
 
-    # inicio del segundo proceso
-    upper_dictionary = {}
-
-    # Proceso de cambio a mayúsculas tomando como base el diccionario inicial
-    for token in initial_dictionary:
-     token_upper = token.upper()
-     if token_upper not in upper_dictionary:
-         upper_dictionary[token_upper] = initial_dictionary[token]
-    else:
-         upper_dictionary[token_upper] += initial_dictionary[token]  # Si ya existe, sumar la frecuencia
+    # Crear un DataFrame a partir de la lista
+    df_upper = pd.DataFrame(upper_terms)
 
     # Guardar el diccionario con mayúsculas en "2DiccMayus.xlsx"
-    df_upper = pd.DataFrame(list(upper_dictionary.items()), columns=['Termino', 'Frecuencia'])
     df_upper.to_excel(os.path.join(output_folder, '2DiccMayus.xlsx'), index=False)
     print('Diccionario con mayúsculas guardado en "2DiccMayus.xlsx".')
+    
 
-    #Proceso numero 3
+    # Paso 3: Filtrar las stop words del diccionario en mayúsculas
     stop_words = set(stopwords.words('spanish'))
     stop_words_upper = {word.upper() for word in stop_words}
-    filtered_dictionary = {word: count for word, count in upper_dictionary.items() if word not in stop_words_upper}
+
+    # Crear una lista para los términos filtrados
+    filtered_terms = []
+    for token, freq in df_upper.values:
+        if token not in stop_words_upper:
+            filtered_terms.append({'Termino': token, 'Frecuencia': freq})
+
+    # Crear un DataFrame a partir de la lista de términos filtrados
+    df_filtered = pd.DataFrame(filtered_terms)
 
     # Guardar el diccionario sin stop words en "3DiccMSinStopWords.xlsx"
-    df_filtered = pd.DataFrame(list(filtered_dictionary.items()), columns=['Termino', 'Frecuencia'])
     df_filtered.to_excel(os.path.join(output_folder, '3DiccMSinStopWords.xlsx'), index=False)
     print('Diccionario sin stop words guardado en "3DiccMSinStopWords.xlsx".')
-    
-    #Proceso numnero 4
+
+   # Paso 4: Proceso de stemming
     stemmer = SnowballStemmer("spanish")
     stemmed_dictionary = {}
-    
-    for word, count in filtered_dictionary.items():
+
+    for word, count in df_filtered.values:
         stemmed_word = stemmer.stem(word).upper()
         if stemmed_word not in stemmed_dictionary:
             stemmed_dictionary[stemmed_word] = count
@@ -144,7 +150,7 @@ def tokenize_and_process_documents(corpus_dir):
     df_stemmed = pd.DataFrame(list(stemmed_dictionary.items()), columns=['Termino', 'Frecuencia'])
     df_stemmed.to_excel(os.path.join(output_folder, '4DiccDeSteams.xlsx'), index=False)
     print('Diccionario con stemming guardado en "4DiccDeSteams.xlsx".')
-
+    
 def preprocess_documents():
     corpus_dir = 'Corpus'
     if os.path.exists(corpus_dir):
