@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import tkinter as tk
 from tkinter import messagebox
-from arbol import BTree  # Asegúrate de que la clase BTree esté en el archivo arbol.py
+from arbol import BTree  # Importamos el árbol B
 
 class App:
     def __init__(self, root):
@@ -13,7 +13,16 @@ class App:
 
     def create_widgets(self):
         load_button = tk.Button(self.root, text="Cargar STEAMS", command=self.load_steams)
-        load_button.pack(pady=20)
+        load_button.pack(pady=10)
+
+        search_label = tk.Label(self.root, text="Buscar palabra:")
+        search_label.pack(pady=5)
+
+        self.search_entry = tk.Entry(self.root)
+        self.search_entry.pack(pady=5)
+
+        search_button = tk.Button(self.root, text="Buscar", command=self.search_word)
+        search_button.pack(pady=10)
 
     def read_steams_from_excel(self, file_path):
         df = pd.read_excel(file_path)
@@ -36,6 +45,17 @@ class App:
 
         self.b_tree.display()  # Mostrar el árbol en consola
         messagebox.showinfo("Éxito", "STEAMS cargados en el árbol.")
+
+    def search_word(self):
+        word = self.search_entry.get()
+        if word:
+            found = self.b_tree.search(word)
+            if found:
+                messagebox.showinfo("Resultado", f"La palabra '{word}' fue encontrada en el árbol.")
+            else:
+                messagebox.showinfo("Resultado", f"La palabra '{word}' NO fue encontrada en el árbol.")
+        else:
+            messagebox.showwarning("Entrada vacía", "Por favor, ingresa una palabra para buscar.")
 
 if __name__ == "__main__":
     root = tk.Tk()
