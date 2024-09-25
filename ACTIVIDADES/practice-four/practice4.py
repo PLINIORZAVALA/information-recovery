@@ -53,7 +53,7 @@ def index_steams():
     print(f"Tabla hash guardada en {output_file}.")
     return steam_hash_table  # Devolvemos la tabla hash para su uso posterior
 
-# Clase principal para integrar el Árbol B y la interfaz
+# Clase principal para integrar el Árbol B 
 class App:
     def __init__(self, root):
         self.root = root
