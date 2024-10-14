@@ -1,0 +1,5 @@
+Exactitud: 0.70
+Precisión: 1.00
+Sensibilidad: 0.25
+Tasa de error: 0.30
+F1-score: 0.40

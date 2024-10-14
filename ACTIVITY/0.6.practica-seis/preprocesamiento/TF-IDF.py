@@ -1,13 +1,10 @@
 import os
 import unicodedata
 import pandas as pd
-from collections import deque
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
-from collections import defaultdict
 from collections import Counter
-from nltk.stem import PorterStemmer, WordNetLemmatizer
 import docx
 import PyPDF2
 import pptx
@@ -15,15 +12,14 @@ from openpyxl import load_workbook
 from nltk import download
 import re 
 import math
-
+from collections import Counter
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+from sklearn.metrics import confusion_matrix, classification_report
 
 # Descargar recursos de NLTK
 download('punkt')
 download('stopwords')
-download('wordnet')
-
-# Inicializa el stemmer para español
-stemmer = SnowballStemmer("spanish")
 
 # Funciones para leer archivos
 def read_word(filepath):
@@ -61,12 +57,12 @@ def create_folder():
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     return output_folder
-
 # Leer archivo con los steams
 def read_steams_from_excel(file_path):
     df = pd.read_excel(file_path)
     steams = df['Termino'].astype(str).tolist()  # Aseguramos que todo sea cadena
     return steams
+
 
 # Función hash personalizada para evitar colisiones
 def custom_hash(steam, table_size):
@@ -118,6 +114,8 @@ def index_steams():
     print(f"Tabla hash guardada en {output_file}.")
     
     return steam_hash_table  # Devolvemos la tabla hash para su uso posterior
+
+
 
 # Función para procesar un solo documento (sin mayúsculas ni stemming aún)
 def process_document_basic(content, stop_words_upper):
@@ -250,11 +248,12 @@ def tokenize_and_process_documents(corpus_dir):
     # Leer el archivo de conteo de documentos por término
     document_term_count_file = os.path.join(output_folder, 'Conteo_Documentos_Termino.xlsx')
     # Calcular el IDF
-    calculate_idf(total_documents, document_term_count_file, output_folder)
+    calculate_idf(total_documents, document_term_count_file, output_folder, document_word_counts)
 
     # Al final del procesamiento, después de calcular TF e IDF
     calculate_tf_idf(Frecuencia_Terminos, os.path.join(output_folder, 'IDF.xlsx'), output_folder)
     
+    # 
 
 def save_document_word_counts(document_word_counts, output_folder, stemmed_dictionary):
     # Obtener todas las palabras únicas del diccionario con stemming
@@ -294,6 +293,8 @@ def save_document_word_counts(document_word_counts, output_folder, stemmed_dicti
     df_doc_count.to_excel(output_doc_count_file, index=False)
     print(f"Conteo de documentos por término guardado en: {output_doc_count_file}")
 
+Frecuencia_Terminos = 'PreprocesamientoSteps/Frecuencia_Terminos_Por_Documento.xlsx'  # Asegúrate de dar la ruta correcta
+
 def calculate_tf(Frecuencia_Terminos, total_documents, output_folder):
     # Leer el archivo Excel existente
     df = pd.read_excel(Frecuencia_Terminos, index_col=0)  # Usa la primera columna como índice (nombres de documentos)
@@ -306,26 +307,29 @@ def calculate_tf(Frecuencia_Terminos, total_documents, output_folder):
     df_tf.to_excel(output_file, index=True)
     print(f"TF guardado en: {output_file}")
 
-Frecuencia_Terminos = 'PreprocesamientoSteps/Frecuencia_Terminos_Por_Documento.xlsx'  # Asegúrate de dar la ruta correcta
-
-def calculate_idf(total_documents, document_term_count_file, output_folder):
+def calculate_idf(total_documents, document_term_count_file, output_folder, document_word_counts):
     # Leer el archivo de conteo de documentos por término
     df_term_doc_count = pd.read_excel(document_term_count_file)
 
-    # Calcular el IDF
+    # Calcular el IDF (basado en el total de documentos)
     df_term_doc_count['IDF'] = df_term_doc_count['Documentos_Contienen_Termino'].apply(
         lambda doc_count: math.log2(total_documents / doc_count) if doc_count > 0 else 0
     )
-    # Crear un DataFrame con los términos como columnas
-    df_idf = pd.DataFrame(df_term_doc_count['IDF']).T  # Transponer para que los términos sean columnas
-    df_idf.columns = df_term_doc_count['Termino']  # Asignar los términos como nombres de las columnas
+    
+    # Crear un DataFrame con los nombres de los documentos en las filas y los términos en las columnas
+    df_idf = pd.DataFrame(index=list(document_word_counts.keys()), columns=df_term_doc_count['Termino'])
 
-    # Guardar el DataFrame transpuesto en un archivo Excel
+    # Llenar cada columna con su valor de IDF correspondiente
+    for term in df_idf.columns:
+        if term in df_term_doc_count['Termino'].values:
+            idf_value = df_term_doc_count.loc[df_term_doc_count['Termino'] == term, 'IDF'].values[0]
+            df_idf[term] = idf_value  # Rellenar toda la columna con el mismo valor de IDF
+        else:
+            df_idf[term] = 0  # Si no existe el término, llenarlo con 0
+
+    # Guardar el DataFrame en un archivo Excel
     output_file = os.path.join(output_folder, 'IDF.xlsx')
-    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-    # Escribir el DataFrame en el archivo, comenzando desde la celda B1
-        df_idf.to_excel(writer, startrow=0, startcol=1, index=False, header=True)
-
+    df_idf.to_excel(output_file, index=True)  # Guardamos el DataFrame con los nombres de los documentos como índice
     
     print(f"IDF guardado en: {output_file}")
 
@@ -354,83 +358,225 @@ def calculate_tf_idf(tf_file, idf_file, output_folder):
     df_tf_idf = df_tf_common.multiply(idf_values_common, axis=1)
 
     # Guardar el DataFrame de TF-IDF en un archivo Excel
-    output_file = os.path.join(output_folder, ' 8MatrizTF-IDFdeSteams.xlsx')
+    output_file = os.path.join(output_folder, '8MatrizTF-IDF.xlsx')
     df_tf_idf.to_excel(output_file, index=True)
     print(f"TF-IDF guardado en: {output_file}")
 
-
-# FUCIONES PARA EL PROCESO DE CONSULTA
-
-
-# Inicializar el lemmatizer
-lemmatizer = WordNetLemmatizer()
-
-# Cargar el Excel
-archivo_excel = 'PreprocesamientoSteps/8MatrizTF-IDFdeSteams.xlsx'
-hashs = 'PreprocesamientoSteps/5ListDiccIndex.xlsx'
-corpus_dir = 'corpus'
-
-
-# Ruta del archivo de frecuencias de términos
-Frecuencia_Terminos = 'PreprocesamientoSteps/Frecuencia_Terminos_Por_Documento.xlsx'
-
-# 1. Cargar el archivo Excel
-df_frecuencia = pd.read_excel(Frecuencia_Terminos)
-
-# 2. Leer la consulta en lenguaje natural
-consulta_q = input("Ingrese la consulta en lenguaje natural: ")
-
-# 3. Procesar la consulta (sin aplicar stemming)
-def procesar_consulta(consulta_q):
-    stop_words = set(stopwords.words('spanish'))
-    tokens = consulta_q.split()
+def create_query_vector(query, stemmed_dictionary):
+    # Preprocesar la consulta
+    tokens = word_tokenize(query)
+    stemmer = SnowballStemmer("spanish")
+    stop_words = set(word.upper() for word in stopwords.words('spanish'))
     
-    # Filtrar stopwords (opcional, según tu preferencia)
-    consulta_procesada = [
-        token for token in tokens if token not in stop_words
+    # Normalizar acentos y quitar signos de puntuación
+    processed_tokens = [
+        unicodedata.normalize('NFKD', token).encode('ascii', 'ignore').decode('utf-8').upper()
+        for token in tokens if token.isalpha() and token.upper() not in stop_words
     ]
 
-    return consulta_procesada
-
-consulta_procesada = procesar_consulta(consulta_q)
-print("Consulta procesada:", consulta_procesada)
-
-# 4. Verificar si los términos procesados están en las columnas del DataFrame
-terminos_presentes = {}
-for term in consulta_procesada:
-    terminos_presentes[term] = term in df_frecuencia.columns
-
-
-# Crear un diccionario para almacenar los términos y sus valores como columnas
-data_dict = {}
-
-# 5. Recopilar términos y valores en el diccionario
-for term, existe in terminos_presentes.items():
-    if existe:
-        # Extraer los valores de la columna correspondiente
-        valores = df_frecuencia[term]
-        data_dict[term] = valores.tolist()  # Guardar los valores como una lista en el diccionario
-    else:
-        print(f"El término '{term}' NO está presente en el archivo Excel.")
-
-# Crear un DataFrame a partir del diccionario
-df_resultados = pd.DataFrame(data_dict)
-
-# Guardar el DataFrame en un archivo Excel
-df_resultados.to_excel('PreprocesamientoSteps/resultados_consult.xlsx', index=False)
-
-print("El archivo Excel ha sido creado exitosamente.")
-
-
-# Función para iniciar el proceso completo
-def preprocess_documents():
+    # Realizar stemming y convertir a mayúsculas
+    processed_tokens = [stemmer.stem(token).upper() for token in processed_tokens]
     
-    # Contar los documentos en el corpus
+    print("Tokens procesados después del filtrado y normalización:", processed_tokens)
+
+    # Contar la frecuencia de los stems en la consulta
+    token_counts = Counter(processed_tokens)
+
+    # Crear el vector de consulta
+    query_vector = np.zeros(len(stemmed_dictionary))
+
+    for i, stem in enumerate(stemmed_dictionary):
+        if stem in token_counts:
+            query_vector[i] = token_counts[stem]  # Asignar la frecuencia del término
+
+    return query_vector
+
+def calculate_similarity(query_vector, tf_idf_matrix):
+    
+    query_vector_reshaped = np.array(query_vector).reshape(1, -1)
+    similarities = cosine_similarity(query_vector_reshaped, tf_idf_matrix)
+    return similarities.flatten()  # Retornar como vector 1D
+
+######################## MATRIZ DE CONFUSION #############################
+def clean_document_name(name):
+    """Función para limpiar los nombres de los documentos eliminando caracteres especiales y extensiones."""
+    # Eliminar caracteres especiales como guiones y guiones bajos, y eliminar la extensión .pdf
+    name = re.sub(r'[-_]', ' ', name)  # Reemplazar guiones y guiones bajos por espacios
+    name = re.sub(r'\.(pdf|txt|docx|pptx)$', '', name, flags=re.IGNORECASE)  # Eliminar extensión .pdf si está presente
+    name = name.strip().lower()  # Quitar espacios en blanco y pasar a minúsculas
+    return name
+
+def etiquetas_reales(file_path, documentos):
+    try:
+        # Leer el archivo Excel
+        df = pd.read_excel(file_path)
+
+        # Verificar que las columnas necesarias estén presentes
+        if 'Documento' not in df.columns or 'Relevancia' not in df.columns:
+            raise ValueError("El archivo debe contener las columnas 'Documento' y 'Relevancia'.")
+
+        # Quitar espacios en blanco en ambas columnas, normalizar a minúsculas y limpiar nombres de documentos
+        df['Documento'] = df['Documento'].apply(clean_document_name)
+        df['Relevancia'] = df['Relevancia'].str.strip()
+
+        # Filtrar solo las etiquetas válidas ('R' y 'NR')
+        df = df[df['Relevancia'].isin(['R', 'NR'])]
+
+        # Imprimir DataFrame para depuración
+        print("\nContenido del DataFrame con etiquetas reales (después de limpiar):")
+        print(df)
+
+        # Generar lista de etiquetas reales en el mismo orden que los documentos
+        etiquetas_reales = []
+        for doc in documentos:
+            doc_normalizado = clean_document_name(doc)  # Normalizar documento con la misma función
+            etiqueta = df.loc[df['Documento'] == doc_normalizado, 'Relevancia']
+
+            # Si no se encuentra, mostrar advertencia para depuración
+            if not etiqueta.empty:
+                etiquetas_reales.append(etiqueta.values[0])
+            else:
+                print(f"Advertencia: No se encontró etiqueta para el documento '{doc_normalizado}'")
+                etiquetas_reales.append(None)  # Si no se encuentra etiqueta
+
+        # Imprimir las etiquetas reales generadas para depuración
+        #print("\nEtiquetas reales en el orden de los documentos:")
+        #print(etiquetas_reales)
+
+        return etiquetas_reales
+
+    except Exception as e:
+        print(f"Error al leer el archivo {file_path}: {e}")
+        return []
+
+# Función para generar predicciones en base a las similitudes
+def get_predicciones(similarities, documentos, threshold=0.005):
+    predicciones = []
+
+    # Iterar sobre las similitudes y los documentos
+    for i, sim in enumerate(similarities):
+        doc = documentos[i]  # Obtener el documento correspondiente
+        
+        # Si la similitud es mayor al umbral, lo clasificamos como "R" (Relevante)
+        if sim > threshold:
+            predicciones.append('R')
+            print(f"Documento: {doc} - Similitud: {sim:.4f} - Predicción: R")
+        else:
+            predicciones.append('NR')
+            print(f"Documento: {doc} - Similitud: {sim:.4f} - Predicción: NR")
+
+    return predicciones
+
+# Función para evaluar el modelo comparando las etiquetas reales con las predicciones
+def evaluar_modelo(etiquetas_reales, predicciones, documentos):
+    # Inicializar contadores para las métricas
+    tp = 0  # Verdaderos Positivos
+    tn = 0  # Verdaderos Negativos
+    fp = 0  # Falsos Positivos
+    fn = 0  # Falsos Negativos
+
+    # Imprimir la comparación entre etiquetas reales y predicciones
+    print("\nComparación entre documentos, etiquetas reales y predicciones:")
+    
+    for i, doc in enumerate(documentos):
+        etiqueta_real = etiquetas_reales[i]
+        prediccion = predicciones[i]
+
+        print(f"Documento: '{doc}', Etiqueta real: '{etiqueta_real}', Predicción: '{prediccion}'")
+
+        # Comparar predicción con la etiqueta real y actualizar contadores
+        if etiqueta_real is not None:  # Evaluar solo si hay una etiqueta real
+            if prediccion == 'R' and etiqueta_real == 'R':
+                tp += 1
+            elif prediccion == 'NR' and etiqueta_real == 'NR':
+                tn += 1
+            elif prediccion == 'R' and etiqueta_real == 'NR':
+                fp += 1
+            elif prediccion == 'NR' and etiqueta_real == 'R':
+                fn += 1
+
+    print(f"\nVerdaderos Positivos (TP): {tp}")
+    print(f"Verdaderos Negativos (TN): {tn}")
+    print(f"Falsos Positivos (FP): {fp}")
+    print(f"Falsos Negativos (FN): {fn}")
+
+    # Calcular las métricas de evaluación
+    exactitud = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    sensibilidad = tp / (tp + fn) if (tp + fn) > 0 else 0
+    tasa_error = (fp + fn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+    f1_score = 2 * (precision * sensibilidad) / (precision + sensibilidad) if (precision + sensibilidad) > 0 else 0
+
+    # Guardar las métricas en un archivo de texto
+    with open('PreprocesamientoSteps/9-5Evaluacionmodelo.txt', 'w') as f:
+        f.write(f"Exactitud: {exactitud:.2f}\n")
+        f.write(f"Precisión: {precision:.2f}\n")
+        f.write(f"Sensibilidad: {sensibilidad:.2f}\n")
+        f.write(f"Tasa de error: {tasa_error:.2f}\n")
+        f.write(f"F1-score: {f1_score:.2f}\n")
+
+    return tp, tn, fp, fn
+
+def generate_matriz_confusion(real_labels, predicted_labels):
+    if isinstance(real_labels, dict):
+        real_labels = list(real_labels.values())
+
+    predicted_labels = list(predicted_labels)
+    cm = confusion_matrix(real_labels, predicted_labels)
+    print("Matriz de confusión:")
+    print(cm)
+
+    # Guardar la matriz de confusión en un archivo Excel
+    cm_df = pd.DataFrame(cm, index=['NR', 'R'], columns=['NR', 'R'])
+    cm_df.to_excel('PreprocesamientoSteps/9Evaluacionmodelo.xlsx', index=True)
+
+    report = classification_report(real_labels, predicted_labels)
+    print("Informe de clasificación:\n", report)
+
+def preprocess_documents():
+    corpus_dir = 'corpus'
+    
     total_documents = count_documents(corpus_dir)
     print(f"Número total de documentos en el corpus: {total_documents}")
 
     if os.path.exists(corpus_dir):
         tokenize_and_process_documents(corpus_dir)
+        
+        tf_idf_df = pd.read_excel('PreprocesamientoSteps/8MatrizTF-IDF.xlsx', index_col=0)
+        tf_idf_matrix = tf_idf_df.values
+        
+        # Obtener el vocabulario de stems
+        stemmed_dictionary = list(tf_idf_df.columns)
+
+        query = input("Introduce tu consulta: ")
+        query_vector = create_query_vector(query, stemmed_dictionary)
+
+        similarities = calculate_similarity(query_vector, tf_idf_matrix)
+        
+        results_df = pd.DataFrame({
+            'Documento': tf_idf_df.index,
+            'Similitud': similarities
+        })
+        
+        results_df = results_df.sort_values(by='Similitud', ascending=False)
+        print("Resultados ordenados por similitud:\n", results_df)
+
+        # Documentos que serán evaluados
+        documentos = results_df['Documento'].tolist()
+        similitudes = results_df['Similitud'].tolist()
+
+        #print("Documentos para evaluación:", documentos)  # Imprime los documentos que se evaluarán
+        #print("Similitudes:", similitudes)
+
+        # Obtener etiquetas reales en el orden de los documentos
+        real_labels = etiquetas_reales('RN-NR.xlsx', documentos)
+
+        # Obtener predicciones a partir de las similitudes
+        predicciones = get_predicciones(similitudes, documentos)  # Ajuste aquí para pasar solo similitudes
+
+        # Evaluar el modelo
+        evaluar_modelo(real_labels, predicciones, documentos)
+
     else:
         print("El directorio 'Corpus' no existe.")
 
